@@ -15,13 +15,14 @@ pub struct FieldRestriction {
 }
 
 pub struct Interface<'a> {
-    functions: Vec<Function<'a>>
+    pub(crate) name: String,
+    pub functions: Vec<Function<'a>>
 }
 
 pub struct Function<'a> {
-    name: String,
-    args: Vec<&'a Schema>,
-    result: &'a Schema
+    pub name: String,
+    pub args: Vec<&'a Schema>,
+    pub result: &'a Schema
 }
 
 pub struct IntermediateRepresentation<'a> {
