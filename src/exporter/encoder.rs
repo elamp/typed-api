@@ -1,12 +1,14 @@
 use crate::ir::{IntermediateRepresentation, Schema, FieldRestriction};
 use crate::exporter::helpers::Helpers;
+use std::ops::Deref;
 
 pub struct TSProtobufEncoder {}
 
 impl TSProtobufEncoder {
     pub fn export(ir: &IntermediateRepresentation) -> Result<String, &'static str> {
         let mut imports: String = "\
-        export function encodeArray<T, U>(args: T[], encodeFct(T)=> V): {values: U[]} { return { values: args.map(encodeFct)} }\n\n\
+        export function encodeArray<T, U>( encodeFct(T)=> V): (args: T[]) =>  U[] {return (args) => args.map(encodeFct)}\n\n\
+        export function identity<T>( arg: T): T {return arg}\n\n\
         ".to_string();
         ir.schemas
             .iter()
@@ -34,7 +36,7 @@ impl TSProtobufEncoder {
             Schema::IntSchema { .. } => { Err("Schema::IntSchema not implemented") }
             Schema::FloatSchema { .. } => { Err("Schema::FloatSchema not implemented") }
             Schema::BooleanSchema { .. } => { Err("Schema::BooleanSchema not implemented") }
-            Schema::ArraySchema { .. } => { Err("Schema::ArraySchema not implemented") }
+            Schema::ArraySchema { item } => { TSProtobufEncoder::format_root_array(item) }
             Schema::OneOf { .. } => { Err("Schema::OneOf not implemented") }
         }
     }
@@ -45,13 +47,39 @@ impl TSProtobufEncoder {
             Schema::ObjectSchema { name, fields, unknown } => {
                 match name {
                     Some(n) => { TSProtobufEncoder::get_encoder(n) }
-                    None => {TSProtobufEncoder::format_object_fields(fields, unknown) }
+                    None => { TSProtobufEncoder::format_object_fields(fields, unknown) }
                 }
             }
-            Schema::ArraySchema { .. } => { Ok("encodeArray".to_string()) }
+            Schema::ArraySchema { item } => { TSProtobufEncoder::format_sub_array(item) }
             Schema::OneOf { .. } => { Err("Schema::OneOf not implemented") }
             _ => { Ok("".to_string())}
         }
+    }
+
+    fn format_root_array(item: &Box<Schema>) -> Result<String, &'static str> {
+        //how to name this encoder ??
+        Err("root Schema::ArraySchema not implemented")
+    }
+
+    fn format_sub_array(item: &Box<Schema>) -> Result<String, &'static str> {
+        match item.deref() {
+            Schema::RefSchema { name } => { TSProtobufEncoder::get_encoder(name) },
+            Schema::ObjectSchema { name, fields, unknown } => {
+                match name{
+                    Some(n) => { TSProtobufEncoder::get_encoder(n)},
+                    None => { TSProtobufEncoder::format_object_fields(fields, unknown) }
+                }
+            },
+            Schema::ArraySchema { item } => {
+                TSProtobufEncoder::format_sub_array(item)
+                    .map(|converted|{
+                        format!("encodeArray({})",converted)
+                    })
+            },
+            Schema::OneOf { .. } => {Err("Schema::OneOf not implemented")},
+            sch => { Ok("encodeArray(identity)".to_string())}
+        }
+
     }
 
     fn get_encoder(name: &String) -> Result<String, &'static str> {
@@ -119,7 +147,8 @@ mod tests {
 
     fn merge_all_times_generated(expected: &str) -> String {
         let mut res = "\
-        export function encodeArray<T, U>(args: T[], encodeFct(T)=> V): {values: U[]} { return { values: args.map(encodeFct)} }\n\n\
+        export function encodeArray<T, U>( encodeFct(T)=> V): (args: T[]) =>  U[] {return (args) => args.map(encodeFct)}\n\n\
+        export function identity<T>( arg: T): T {return arg}\n\n\
         ".to_string();
         res.push_str(expected);
         res
@@ -148,16 +177,21 @@ mod tests {
         assert_eq!(TSProtobufEncoder::export(&ir), Ok(expected));
     }
 
-//
-//    #[test]
-//    fn export_array_primitive() {
-//        let expected = " string[]".to_owned();
-//        let mut ir = IntermediateRepresentation::init();
-//        let schema = Schema::StringSchema { max: None, min: None, regex: None, valid_values: None };
-//        ir.add_schema(Schema::ArraySchema { item: Box::new(schema) });
-//        assert_eq!(TSProtobufEncoder::export(&ir), Ok(expected));
-//    }
-//
+
+    #[test]
+    fn export_array_primitive() {
+        let expected = merge_all_times_generated("\
+        export function encodeIInterface(arg: IInterface): {[x: string]: any} {\n\treturn {\n\t\
+        arr: encodeArray(identity)(arg.arr)\n\
+        }\n}\n\n");
+        let mut ir = IntermediateRepresentation::init();
+        let schema = Schema::StringSchema { max: None, min: None, regex: None, valid_values: None };
+        let mut fields: Vec<(String, FieldRestriction)> = Vec::new();
+        fields.push(("arr".to_string(), FieldRestriction { required: true, base: Schema::ArraySchema { item: Box::new(schema) } }));
+        ir.add_schema(Schema::ObjectSchema { name: Some("Interface".to_string()), fields, unknown: false });
+        assert_eq!(TSProtobufEncoder::export(&ir), Ok(expected));
+    }
+
 //    #[test]
 //    fn export_one_of() {
 //        let expected = " string | number".to_owned();
