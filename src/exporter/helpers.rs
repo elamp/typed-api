@@ -9,4 +9,8 @@ impl Helpers {
     pub fn format_variable_name(name: &String) -> Result<String, &'static str> {
         return Ok(name.clone());
     }
+
+    pub fn format_message_name(name: &String) -> Result<String, &'static str> {
+        return Ok(name.clone());
+    }
 }
