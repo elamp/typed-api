@@ -12,15 +12,15 @@ impl TSProtobufEncoder {
         ".to_string();
         ir.schemas
             .iter()
-            .fold(Ok(imports), | acc, schema| {
-            acc.and_then(|mut output| {
-                TSProtobufEncoder::format_root_schema(schema)
-                    .map(| converted |{
-                        output.push_str(converted.as_str());
-                        output
-                    })
+            .fold(Ok(imports), |acc, schema| {
+                acc.and_then(|mut output| {
+                    TSProtobufEncoder::format_root_schema(schema)
+                        .map(|converted| {
+                            output.push_str(converted.as_str());
+                            output
+                        })
+                })
             })
-        })
     }
 
     fn format_root_schema(schema: &Schema) -> Result<String, &'static str> {
@@ -28,7 +28,7 @@ impl TSProtobufEncoder {
             Schema::RefSchema { .. } => { Err("Schema::RefSchema not implemented") }
             Schema::ObjectSchema { name, fields, unknown } => {
                 match name {
-                    Some(n) => {TSProtobufEncoder::format_object(n, fields, unknown) }
+                    Some(n) => { TSProtobufEncoder::format_object(n, fields, unknown) }
                     None => { Err("can't name a function to encode an unnamed object") }
                 }
             }
@@ -43,7 +43,7 @@ impl TSProtobufEncoder {
 
     fn format_sub_schema(schema: &Schema) -> Result<String, &'static str> {
         match schema {
-            Schema::RefSchema { name } => { TSProtobufEncoder::get_encoder(name)  }
+            Schema::RefSchema { name } => { TSProtobufEncoder::get_encoder(name) }
             Schema::ObjectSchema { name, fields, unknown } => {
                 match name {
                     Some(n) => { TSProtobufEncoder::get_encoder(n) }
@@ -51,8 +51,10 @@ impl TSProtobufEncoder {
                 }
             }
             Schema::ArraySchema { item } => { TSProtobufEncoder::format_sub_array(item) }
-            Schema::OneOf { .. } => { Err("Schema::OneOf not implemented") }
-            _ => { Ok("".to_string())}
+            Schema::OneOf { .. } => {
+                Err("Schema::OneOf is not implemented")
+            }
+            _ => { Ok("".to_string()) }
         }
     }
 
@@ -63,23 +65,62 @@ impl TSProtobufEncoder {
 
     fn format_sub_array(item: &Box<Schema>) -> Result<String, &'static str> {
         match item.deref() {
-            Schema::RefSchema { name } => { TSProtobufEncoder::get_encoder(name) },
+            Schema::RefSchema { name } => { TSProtobufEncoder::get_encoder(name) }
             Schema::ObjectSchema { name, fields, unknown } => {
-                match name{
-                    Some(n) => { TSProtobufEncoder::get_encoder(n)},
+                match name {
+                    Some(n) => { TSProtobufEncoder::get_encoder(n) }
                     None => { TSProtobufEncoder::format_object_fields(fields, unknown) }
                 }
-            },
+            }
             Schema::ArraySchema { item } => {
                 TSProtobufEncoder::format_sub_array(item)
-                    .map(|converted|{
-                        format!("encodeArray({})",converted)
+                    .map(|converted| {
+                        format!("encodeArray({})", converted)
                     })
-            },
-            Schema::OneOf { .. } => {Err("Schema::OneOf not implemented")},
-            sch => { Ok("encodeArray(identity)".to_string())}
+            }
+            Schema::OneOf { values } => {
+                TSProtobufEncoder::format_sub_one_of(values, &1)
+                    .map(|converted| {
+                        format!("encodeArray({})", converted)
+                    })
+            }
+            sch => { Ok("encodeArray(identity)".to_string()) }
         }
+    }
 
+    fn format_sub_one_of(values: &Vec<Schema>, start_index: &usize) -> Result<String, &'static str> {
+        let mut index = start_index.clone();
+        let vec_converted: Vec<String> = Vec::new();
+        values
+            .iter()
+            .fold(Ok(vec_converted), |acc, schema| {
+                acc.and_then(|mut output| {
+                    let res = match schema {
+                        Schema::ArraySchema { item } => {
+                            TSProtobufEncoder::format_sub_array(item)
+                                .map(|converted| {
+                                    output.push(format!("oneOf{}: {{value: {}(arg)}}", index, converted));
+                                    output
+                                })
+                        }
+                        Schema::OneOf { .. } => {
+                            Err("One of in One of")
+                        }
+                        sch => {
+                            TSProtobufEncoder::format_sub_schema(sch)
+                                .map(|converted| {
+                                    output.push(format!("\n\t\toneOf{m} = {n}(arg)", n = converted, m = index));
+                                    output
+                                })
+                        }
+                    };
+                    index = index + 1;
+                    res
+                })
+            })
+            .map(|converted_vec| {
+                format!("(arg: any ): {{[x:string]: any}} => {{\n\t{}\n}}", converted_vec.join(","))
+            })
     }
 
     fn get_encoder(name: &String) -> Result<String, &'static str> {
@@ -91,16 +132,16 @@ impl TSProtobufEncoder {
         Helpers::format_interface_name(name)
             .and_then(|interface_name|
                 if *unknown {
-                    TSProtobufEncoder::format_object_fields(fields,unknown)
-                        .map(|converted|{
+                    TSProtobufEncoder::format_object_fields(fields, unknown)
+                        .map(|converted| {
                             format!("export function encode{}(arg: {}): {{value: string}} {}\n\n",
-                                    interface_name, interface_name,converted)
+                                    interface_name, interface_name, converted)
                         })
                 } else {
-                    TSProtobufEncoder::format_object_fields(fields,unknown)
-                        .map(|converted|{
+                    TSProtobufEncoder::format_object_fields(fields, unknown)
+                        .map(|converted| {
                             format!("export function encode{}(arg: {}): {{[x: string]: any}} {}\n\n",
-                                    interface_name, interface_name,converted)
+                                    interface_name, interface_name, converted)
                         })
                 }
             )
@@ -110,29 +151,47 @@ impl TSProtobufEncoder {
         if *unknown {
             Ok("{\n\treturn {value: JSON.stringify(arg)}\n}".to_string())
         } else {
+            let mut index = 0;
             fields
                 .iter()
-                .fold(Ok(Vec::new()),| acc, (key, field )|{
+                .fold(Ok(Vec::new()), |acc, (key, field)| {
                     acc.and_then(|mut output| {
-                        TSProtobufEncoder::format_sub_schema(&field.base)
-                            .map(|converted|{
-                                if field.required {
-                                    if converted.len() == 0 {
-                                        format!("{k}: arg.{k}", k= key)
-                                    }else {
-                                        format!("{k}: {c}(arg.{k})", k= key, c= converted)
-                                    }
-                                } else {
-                                    format!("{k}: arg.{k}?{c}(arg.{k}): null", k= key, c= converted)
-                                }
-                            })
-                            .map(|converted|{
-                                output.push(converted);
-                                output
-                            })
+                        match &field.base {
+                            Schema::OneOf { values } => {
+                                let res = TSProtobufEncoder::format_sub_one_of(&values, &index)
+                                    .map(|converted| {
+                                        format!("{k}: encodeArray({})(arg.{k})", converted, k = key)
+                                    })
+                                    .map(|converted| {
+                                        output.push(converted);
+                                        output
+                                    });
+                                index = index + values.len();
+                                res
+                            }
+                            sch => {
+                                index = index + 1;
+                                TSProtobufEncoder::format_sub_schema(&field.base)
+                                    .map(|converted| {
+                                        if field.required {
+                                            if converted.len() == 0 {
+                                                format!("{k}: arg.{k}", k = key)
+                                            } else {
+                                                format!("{k}: {c}(arg.{k})", k = key, c = converted)
+                                            }
+                                        } else {
+                                            format!("{k}: arg.{k}?{c}(arg.{k}): null", k = key, c = converted)
+                                        }
+                                    })
+                                    .map(|converted| {
+                                        output.push(converted);
+                                        output
+                                    })
+                            }
+                        }
                     })
                 })
-                .map(| output|{
+                .map(|output| {
                     format!("{{\n\treturn {{\n\t{}\n}}\n}}", output.join(",\n\t"))
                 })
         }

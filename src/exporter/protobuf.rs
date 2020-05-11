@@ -134,16 +134,14 @@ impl Protobuf {
         let mut needed_messages = "".to_string();
         let mut fields = "{".to_string();
         let mut index = start_index.clone();
-        let mut needed_messages_index = 0;
         schemas.iter().fold(Ok((needed_messages, fields)), |acc, schema| {
             acc.and_then(|(mut needed_messages, mut fields)| {
                 let res = match schema {
                     Schema::ArraySchema { item } => {
                         Protobuf::format_schema(item.deref())
                             .map(|converted| {
-                                needed_messages_index = needed_messages_index + 1;
-                                needed_messages.push_str(format!("\n\tmessage Array{} {{repeated {} values = 1;}}", needed_messages_index, converted).as_str());
-                                fields.push_str(format!("\n\t\tArray{n} oneOf{m} = {m};", n = needed_messages_index, m = index).as_str());
+                                needed_messages.push_str(format!("\n\tmessage Array{} {{repeated {} values = 1;}}", index, converted).as_str());
+                                fields.push_str(format!("\n\t\tArray{m} oneOf{m} = {m};", m = index).as_str());
                                 (needed_messages, fields)
                             })
                     }
@@ -251,7 +249,7 @@ mod tests {
 
     #[test]
     fn export_one_of_array() {
-        let expected = Ok("message Interface {\n\tmessage Array1 {repeated string values = 1;}\n\toneof comment {\n\t\tstring oneOf1 = 1;\n\t\tint64 oneOf2 = 2;\n\t\tArray1 oneOf3 = 3;\n\t}\n}\n".to_owned());
+        let expected = Ok("message Interface {\n\tmessage Array3 {repeated string values = 1;}\n\toneof comment {\n\t\tstring oneOf1 = 1;\n\t\tint64 oneOf2 = 2;\n\t\tArray3 oneOf3 = 3;\n\t}\n}\n".to_owned());
         let mut ir = IntermediateRepresentation::init();
         let schema_string = Schema::StringSchema { max: None, min: None, regex: None, valid_values: None };
         let schema_int = Schema::IntSchema { max: None, min: None, valid_values: None };
