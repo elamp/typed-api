@@ -13,6 +13,7 @@ So this program aims:
 # Roadmap
 
  - [ ] generate GRPC / Typescript client and server
+ - [ ] generate Typescript schema for validation in server
  - [ ] add cli
  - [ ] generate HTTP
  - [ ] add GUI 
