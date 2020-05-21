@@ -51,9 +51,6 @@ impl TSProtobufEncoder {
                 }
             }
             Schema::ArraySchema { item } => { TSProtobufEncoder::format_sub_array(item) }
-            Schema::OneOf { .. } => {
-                Err("Schema::OneOf is not implemented")
-            }
             _ => { Ok("".to_string()) }
         }
     }
@@ -90,37 +87,59 @@ impl TSProtobufEncoder {
 
     fn format_sub_one_of(values: &Vec<Schema>, start_index: &usize) -> Result<String, &'static str> {
         let mut index = start_index.clone();
-        let vec_converted: Vec<String> = Vec::new();
         values
             .iter()
-            .fold(Ok(vec_converted), |acc, schema| {
+            .fold(Ok("".to_string()), |acc, schema| {
                 acc.and_then(|mut output| {
                     let res = match schema {
-                        Schema::ArraySchema { item } => {
-                            TSProtobufEncoder::format_sub_array(item)
+                        Schema::ArraySchema { .. } => {
+                            TSProtobufEncoder::format_sub_schema(schema)
                                 .map(|converted| {
-                                    output.push(format!("oneOf{}: {{value: {}(arg)}}", index, converted));
+                                    output.push_str("\n\t\tif(Array.isArray(arg)){");
+                                    output.push_str(converted.as_str());
+                                    output.push_str("(arg)}");
                                     output
+                                })
+                        }
+                        Schema::ObjectSchema { name, fields, unknown } => {
+                            TSProtobufEncoder::format_object_detection(fields)
+                                .and_then(|if_condition| {
+                                    TSProtobufEncoder::format_sub_schema(schema)
+                                        .map(|converted| {
+                                            output.push_str("\n\t\tif(");
+                                            output.push_str(if_condition.as_str());
+                                            output.push_str("){");
+                                            output.push_str(converted.as_str());
+                                            output.push_str("(arg)}");
+                                            output
+                                        })
                                 })
                         }
                         Schema::OneOf { .. } => {
                             Err("One of in One of")
                         }
-                        sch => {
-                            TSProtobufEncoder::format_sub_schema(sch)
-                                .map(|converted| {
-                                    output.push(format!("\n\t\toneOf{m} = {n}(arg)", n = converted, m = index));
-                                    output
-                                })
-                        }
+                        _ => { Ok(output) }
                     };
                     index = index + 1;
                     res
                 })
             })
             .map(|converted_vec| {
-                format!("(arg: any ): {{[x:string]: any}} => {{\n\t{}\n}}", converted_vec.join(","))
+                format!("(arg: any ): {{[x:string]: any}} => {{{}\n\t\treturn arg\n\t}}", converted_vec)
             })
+    }
+
+    fn format_object_detection(fields: &Vec<(String, FieldRestriction)>) -> Result<String, &'static str> {
+        let arr: Vec<String> = Vec::new();
+        fields
+            .iter()
+            .fold(Ok(arr), |acc, (field_name, field)| {
+                acc.map(|mut output| {
+                    output.push(format!("arg.{}", field_name));
+                    output
+                })
+            })
+            .map(|output| output.join(" & "))
     }
 
     fn get_encoder(name: &String) -> Result<String, &'static str> {
@@ -160,7 +179,7 @@ impl TSProtobufEncoder {
                             Schema::OneOf { values } => {
                                 let res = TSProtobufEncoder::format_sub_one_of(&values, &index)
                                     .map(|converted| {
-                                        format!("{k}: encodeArray({})(arg.{k})", converted, k = key)
+                                        format!("{k}: {}(arg.{k})", converted, k = key)
                                     })
                                     .map(|converted| {
                                         output.push(converted);
@@ -251,15 +270,20 @@ mod tests {
         assert_eq!(TSProtobufEncoder::export(&ir), Ok(expected));
     }
 
-//    #[test]
-//    fn export_one_of() {
-//        let expected = " string | number".to_owned();
-//        let mut ir = IntermediateRepresentation::init();
-//        let schema_string = Schema::StringSchema { max: None, min: None, regex: None, valid_values: None };
-//        let schema_int = Schema::IntSchema { max: None, min: None, valid_values: None };
-//        ir.add_schema(Schema::OneOf { values: vec!(schema_string, schema_int) });
-//        assert_eq!(TSProtobufEncoder::export(&ir), Ok(expected));
-//    }
+    #[test]
+    fn export_one_of() {
+        let expected = merge_all_times_generated("\
+        export function encodeIInterface(arg: IInterface): {[x: string]: any} {\n\treturn {\n\t\
+        arr: (arg: any ): {[x:string]: any} => {\n\t\treturn arg\n\t}(arg.arr)\n}\
+        \n}\n\n");
+        let mut ir = IntermediateRepresentation::init();
+        let schema_string = Schema::StringSchema { max: None, min: None, regex: None, valid_values: None };
+        let schema_int = Schema::IntSchema { max: None, min: None, valid_values: None };
+        let mut fields: Vec<(String, FieldRestriction)> = Vec::new();
+        fields.push(("arr".to_string(), FieldRestriction { required: true, base: Schema::OneOf { values: vec!(schema_string, schema_int) } }));
+        ir.add_schema(Schema::ObjectSchema { name: Some("Interface".to_string()), fields, unknown: false });
+        assert_eq!(TSProtobufEncoder::export(&ir), Ok(expected));
+    }
 
 
     #[test]
