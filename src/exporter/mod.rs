@@ -11,7 +11,7 @@ use helpers::Helpers;
 use interfaces::TypescriptInterface;
 use protobuf::Protobuf;
 use encoder::TSProtobufEncoder;
-use clients::TypescriptClient;
+use clients::{{TypescriptGRPCClient, TypescriptHTTPClient}};
 
 pub struct TypescriptGRPC {}
 
@@ -22,7 +22,20 @@ impl TypescriptGRPC {
     }
 
     pub fn export_client(ir: &IntermediateRepresentation) -> Result<String, &'static str> {
-        TypescriptClient::export(ir)
+        TypescriptGRPCClient::export(ir)
+    }
+
+}
+
+pub struct TypescriptHTTP {}
+
+impl TypescriptHTTP {
+    pub fn export_types(ir: &IntermediateRepresentation) -> Result<String, &'static str> {
+        TypescriptInterface::export(ir)
+    }
+
+    pub fn export_client(ir: &IntermediateRepresentation) -> Result<String, &'static str> {
+        TypescriptHTTPClient::export(ir)
     }
 
 }
